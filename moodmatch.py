@@ -270,69 +270,68 @@ def get_spotify_client() -> spotipy.Spotify:
 def search_tracks_by_features(sp: spotipy.Spotify,
                                features: dict,
                                n_results: int = 50) -> list:
-    """
-    Map librosa audio features to Spotify tuneable attributes and
-    call the Recommendations endpoint to get candidate tracks.
-
-    Mapping logic:
-      tempo           → target_tempo (direct)
-      rms_mean        → target_energy (scaled)
-      harmonic_ratio  → target_valence (proxy)
-      beat_regularity → target_danceability (proxy)
-      spectral_centroid → target_acousticness (inverse proxy)
-      zcr_mean        → target_instrumentalness (inverse proxy)
-    """
-    tempo    = features.get('tempo', 120.0)
+    tempo = features.get('tempo', 120.0)
     rms_mean = features.get('rms_mean', 0.05)
+    harm_ratio = features.get('harmonic_ratio', 0.5)
 
-    target_energy        = float(np.clip(rms_mean * 10 + (tempo - 60) / 200, 0, 1))
-    target_valence       = float(np.clip(features.get('harmonic_ratio', 0.5) * 0.6
-                                         + features.get('chroma_std', 0.1) * 2, 0, 1))
-    target_dance         = float(np.clip(features.get('beat_regularity', 1.0) / 50.0, 0, 1))
-    target_acoustic      = float(np.clip(1.0 - (features.get('spectral_centroid_mean', 2000)
-                                                  / 8000), 0, 1))
-    target_instrumental  = float(np.clip(1.0 - features.get('zcr_mean', 0.05) * 10, 0, 1))
+    # Build search queries based on audio characteristics
+    if tempo > 120:
+        energy = "energetic upbeat"
+    elif tempo > 90:
+        energy = "moderate tempo"
+    else:
+        energy = "slow calm"
 
-    genre_seeds = ['pop', 'rock', 'electronic']
+    if harm_ratio > 0.6:
+        mood = "melodic harmonic"
+    else:
+        mood = "rhythmic"
 
-    try:
-        recs = sp.recommendations(
-            seed_genres=genre_seeds,
-            limit=n_results,
-            target_energy=round(target_energy, 3),
-            target_valence=round(target_valence, 3),
-            target_danceability=round(target_dance, 3),
-            target_acousticness=round(target_acoustic, 3),
-            target_instrumentalness=round(target_instrumental, 3),
-            target_tempo=round(tempo, 1),
-            min_popularity=20
-        )
-        tracks = recs.get('tracks', [])
-    except Exception as e:
-        st.warning(f"Spotify Recommendations error: {e}")
-        tracks = []
+    queries = [
+        f"{energy} {mood}",
+        f"{energy} music",
+        f"{mood} music",
+        "popular music",
+        "top hits"
+    ]
 
     results = []
-    for t in tracks:
-        results.append({
-            'id':           t['id'],
-            'name':         t['name'],
-            'artist':       ', '.join(a['name'] for a in t['artists']),
-            'preview_url':  t.get('preview_url'),
-            'external_url': t['external_urls'].get('spotify', ''),
-            'album_art':    t['album']['images'][0]['url']
-                            if t['album']['images'] else None,
-            'popularity':   t.get('popularity', 0),
-            # Store mapped targets on the track for similarity calc
-            '_target_tempo':        tempo,
-            '_target_energy':       target_energy,
-            '_target_valence':      target_valence,
-            '_target_dance':        target_dance,
-            '_target_acoustic':     target_acoustic,
-            '_target_instrumental': target_instrumental,
-        })
+    seen_ids = set()
 
-    return results
+    for query in queries:
+        if len(results) >= n_results:
+            break
+        try:
+            search_results = sp.search(
+                q=query,
+                type='track',
+                limit=10
+            )
+            tracks = search_results.get('tracks', {}).get('items', [])
+            for t in tracks:
+                if t['id'] not in seen_ids:
+                    seen_ids.add(t['id'])
+                    results.append({
+                        'id':           t['id'],
+                        'name':         t['name'],
+                        'artist':       ', '.join(a['name'] for a in t['artists']),
+                        'preview_url':  t.get('preview_url'),
+                        'external_url': t['external_urls'].get('spotify', ''),
+                        'album_art':    t['album']['images'][0]['url']
+                                        if t['album']['images'] else None,
+                        'popularity':   t.get('popularity', 0),
+                        '_target_tempo':        tempo,
+                        '_target_energy':       float(np.clip(rms_mean * 10, 0, 1)),
+                        '_target_valence':      float(np.clip(harm_ratio, 0, 1)),
+                        '_target_dance':        float(np.clip(tempo / 200, 0, 1)),
+                        '_target_acoustic':     float(np.clip(1.0 - (features.get('spectral_centroid_mean', 2000) / 8000), 0, 1)),
+                        '_target_instrumental': float(np.clip(1.0 - features.get('zcr_mean', 0.05) * 10, 0, 1)),
+                    })
+        except Exception as e:
+            print(f"Search error for query '{query}': {e}")
+            continue
+
+    return results[:n_results]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
