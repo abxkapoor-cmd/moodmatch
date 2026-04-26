@@ -569,44 +569,52 @@ def main():
             st.session_state.search_results = search_spotify_songs(sp, query, limit=8)
             st.session_state.search_query   = query
 
-    # ── Search Results ────────────────────────────────────────────────────────
-    if st.session_state.search_results:
-        st.markdown("**Select a song:**")
+   # ── Search Results ────────────────────────────────────────────────────────────
+if st.session_state.search_results:
+    st.markdown("**Select a song:**")
 
-        # FIX #2: use enumerate so `i` is always defined
-        for i, track in enumerate(st.session_state.search_results):
-            col_art, col_info, col_select = st.columns([1, 6, 2])
+    for i, track in enumerate(st.session_state.search_results):
+        col_art, col_info, col_select = st.columns([1, 6, 2])
 
-            with col_art:
-                if track.get('album_art'):
-                    st.image(track['album_art'], width=55)
+        with col_art:
+            if track.get('album_art'):
+                st.image(track['album_art'], width=55)
 
-            with col_info:
-                st.markdown(f"**{track['name']}**")
-                st.caption(track['artist'])
+        with col_info:
+            st.markdown(f"**{track['name']}**")
+            st.caption(track['artist'])
 
-            with col_select:
-                # FIX #1: single button block — try Spotify preview first, fall back to SoundCloud
-                if st.button("Select ✓", key=f"select_{track['id']}_{i}",
-                             use_container_width=True):
-                    st.session_state.selected_track  = track
-                    st.session_state.recommendations = []
+        with col_select:
+            # ✅ One button, index-based key, guaranteed unique
+            if st.button("Select ✓", key=f"select_{i}", use_container_width=True):
 
-                    if track.get('preview_url'):
-                        with st.spinner("Loading preview..."):
-                            preview = download_preview(track['preview_url'])
-                            st.session_state.preview_bytes = preview
-                    else:
-                        # FIX #3: renamed inner variable to sc_query to avoid shadowing outer `query`
-                        sc_query = f"{track['name']} {track['artist']}"
-                        with st.spinner("Finding audio on SoundCloud..."):
+                # ✅ Clear search results FIRST so loop won't
+                # re-render these buttons on the next rerun
+                st.session_state.search_results  = []
+                st.session_state.selected_track  = track
+                st.session_state.recommendations = []
+                st.session_state.preview_bytes   = None  # reset stale audio
+
+                if track.get('preview_url'):
+                    with st.spinner("Loading preview..."):
+                        preview = download_preview(track['preview_url'])
+                        st.session_state.preview_bytes = preview
+                        if not preview:
+                            st.warning("⚠️ Preview download failed, trying SoundCloud...")
+                            sc_query = f"{track['name']} {track['artist']}"
                             audio = get_soundcloud_audio(sc_query)
-                            if audio:
-                                st.session_state.preview_bytes = audio
-                                st.success("✅ Audio loaded from SoundCloud!")
-                            else:
-                                st.session_state.preview_bytes = None
-                    st.rerun()
+                            st.session_state.preview_bytes = audio
+                else:
+                    # No Spotify preview — go straight to SoundCloud
+                    sc_query = f"{track['name']} {track['artist']}"
+                    with st.spinner("🔍 Finding audio on SoundCloud..."):
+                        audio = get_soundcloud_audio(sc_query)
+                        if audio:
+                            st.session_state.preview_bytes = audio
+                        else:
+                            st.warning("⚠️ No audio found. Try uploading the file manually.")
+
+                st.rerun()
 
     # ── File upload fallback ──────────────────────────────────────────────────
     with st.expander("📁 Or upload your own file instead"):
