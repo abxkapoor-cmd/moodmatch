@@ -621,7 +621,7 @@ def main():
                 st.caption(f"{track['artist']}")
 
             with col_select:
-                if st.button("Select ✓", key=f"select_{track['id']}",
+                if st.button("Select ✓", key=f"select_{track['id']}_{i}",
                              use_container_width=True):
                     st.session_state.selected_track = track
                     # Download preview
